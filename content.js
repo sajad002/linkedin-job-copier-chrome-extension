@@ -1,34 +1,30 @@
 (() => {
-  if (window.__linkedinJobCopierInstalledV11) return;
-  window.__linkedinJobCopierInstalledV11 = true;
+  if (window.__linkedinJobCopierInstalledV120) return;
+  window.__linkedinJobCopierInstalledV120 = true;
 
   const JOB_CARD_SELECTORS = [
+    "li[data-occludable-job-id]",
+    "[data-occludable-job-id]",
+    "[data-job-id]",
     ".job-card-container",
     ".job-card-container--clickable",
     "li.jobs-search-results__list-item",
     ".jobs-search-results-list__list-item",
     "li.scaffold-layout__list-item",
-    "li[data-occludable-job-id]",
-    "[data-job-id]",
-    "[data-entity-urn*='jobPosting']",
     "[data-view-name='job-card']",
-    "[data-testid*='job-card']",
-    ".artdeco-list__item"
-  ];
-
-  const JOB_CARD_HAS_SELECTORS = [
-    "li:has(a[href*='/jobs/view/'])",
-    "div:has(a[href*='/jobs/view/'])"
+    "[data-testid*='job-card']"
   ];
 
   const LIST_CONTAINER_SELECTORS = [
     ".jobs-search-results-list",
     ".jobs-search-results-list__list",
+    ".jobs-search-results__list",
     ".scaffold-layout__list",
-    "[data-testid*='job-results']",
+    ".scaffold-layout__list-container",
+    "ul.jobs-search-results__list",
+    "ul[role='list']",
     "div[aria-label*='Search results']",
-    "div[aria-label*='Job results']",
-    "main div"
+    "div[aria-label*='Job results']"
   ];
 
   const DETAIL_CONTAINER_SELECTORS = [
@@ -50,6 +46,52 @@
     "article"
   ];
 
+  const ROLE_WORDS = /engineer|scientist|developer|entwickler|software|data|machine|learning|ai|nlp|llm|algorithm|intern|internship|student|working student|werkstudent|praktik|praktikum|abschlussarbeit|thesis|quantitative|research|analyst|analytics|computer vision|vision|validation|deployment|strategist|architect|consultant|phd|master/i;
+
+  const NOISE_LINE_PATTERNS = [
+    /^dismiss$/i,
+    /^x$/i,
+    /^…$|^\.\.\.$/,
+    /^more$/i,
+    /^share$/i,
+    /^share negative feedback$/i,
+    /^why am i seeing this job\??$/i,
+    /^are these results helpful\??$/i,
+    /^your feedback helps/i,
+    /^see jobs where you/i,
+    /^job search alert/i,
+    /^this job search alert/i,
+    /^reactivate premium/i,
+    /^job search faster with premium/i,
+    /^about$/i,
+    /^accessibility$/i,
+    /^help center$/i,
+    /^privacy/i,
+    /^ad choices$/i,
+    /^advertising$/i,
+    /^business services$/i,
+    /^get the linkedin app$/i,
+    /^linkedin corporation/i,
+    /^questions\??$/i,
+    /^visit our help center/i,
+    /^manage your account/i,
+    /^recommendation transparency/i,
+    /^sales solutions$/i,
+    /^mobile$/i,
+    /^safety center$/i,
+    /^community guidelines$/i,
+    /^careers$/i,
+    /^talent solutions$/i,
+    /^marketing solutions$/i,
+    /^small business$/i,
+    /^select language$/i
+  ];
+
+  const NOISE_BLOCK_RE = /Are these results helpful|Your feedback helps us improve|Share negative feedback|See jobs where you|LinkedIn Corporation|Privacy & Terms|Community Guidelines|Recommendation transparency|Reactivate Premium|Job search faster with Premium|Select language/i;
+
+  const META_LINE_RE = /^(viewed|saved|promoted|be an early applicant|\d+\s+(company|school) alumni|\d+\s+connections? work here|\d+\s+(minute|minutes|hour|hours|day|days|week|weeks) ago|easy apply|actively hiring|verified|no response insights)/i;
+  const LOCATION_LINE_RE = /remote|on-site|hybrid|berlin|munich|münchen|hamburg|hannover|hanover|frankfurt|cologne|köln|düsseldorf|stuttgart|wolfsburg|dingolfing|weez|kaufbeuren|germany|deutschland|greater .* area|metropolitan area|europe|emea/i;
+
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
   const clean = (value) => (value || "")
@@ -69,14 +111,6 @@
       return [...root.querySelectorAll(selector)];
     } catch (_) {
       return [];
-    }
-  }
-
-  function safeMatches(el, selector) {
-    try {
-      return el.matches(selector);
-    } catch (_) {
-      return false;
     }
   }
 
@@ -108,6 +142,31 @@
     return "";
   }
 
+  function isNoiseLine(line) {
+    const value = clean(line);
+    return !value || NOISE_LINE_PATTERNS.some((pattern) => pattern.test(value));
+  }
+
+  function isBadCardText(text) {
+    return NOISE_BLOCK_RE.test(text);
+  }
+
+  function normalizeCardText(card) {
+    return lines(textOf(card))
+      .filter((line) => !isNoiseLine(line))
+      .filter((line) => !/^report this job$/i.test(line))
+      .filter((line) => !/^send in a message$/i.test(line))
+      .join("\n");
+  }
+
+  function isInLeftResultsArea(el) {
+    const rect = rectOf(el);
+    if (!isVisible(el)) return false;
+    if (rect.width < 120 || rect.height < 20) return false;
+    // The LinkedIn search-results column is the left pane. This avoids copying the right job-detail pane.
+    return rect.left < window.innerWidth * 0.52 && rect.right < window.innerWidth * 0.66;
+  }
+
   function getJobIdFromElement(el) {
     let node = el;
     while (node && node !== document.body) {
@@ -123,10 +182,20 @@
     return "";
   }
 
-  function hrefFrom(el) {
-    const link = safeQueryAll(el, "a[href*='/jobs/view/'], a[href*='currentJobId='], a[href*='/jobs/collections/']")
-      .find((a) => textOf(a) || a.href);
-    const jobId = getJobIdFromElement(el);
+  function jobLinksIn(el) {
+    return safeQueryAll(el, "a[href*='/jobs/view/']").filter((a) => {
+      try {
+        const url = new URL(a.href, location.origin);
+        return /\/jobs\/view\//.test(url.pathname);
+      } catch (_) {
+        return /\/jobs\/view\//.test(a.getAttribute("href") || "");
+      }
+    });
+  }
+
+  function hrefFrom(card) {
+    const link = jobLinksIn(card).find((a) => textOf(a) || a.href) || jobLinksIn(card)[0];
+    const jobId = getJobIdFromElement(card);
 
     if (link?.href) {
       try {
@@ -147,7 +216,7 @@
     const inputs = safeQueryAll(document, "input[aria-label*='Search by title'], input[placeholder*='Search jobs'], input[role='combobox'], input[type='text']");
     const query = inputs
       .map((input) => clean(input.value || input.getAttribute("value") || ""))
-      .find((value) => value && !/Germany|United States|France|Italy|Remote/i.test(value));
+      .find((value) => value && !/Germany|United States|France|Italy|Remote|Hybrid|On-site/i.test(value));
     return query || "";
   }
 
@@ -158,102 +227,95 @@
     return texts.find((text) => /Germany|United States|France|Italy|Spain|Netherlands|Remote|On-site|Hybrid|Berlin|Munich|Hamburg/i.test(text)) || "";
   }
 
-  function normalizeCardText(card) {
-    return lines(textOf(card))
-      .filter((line) => !/^dismiss$/i.test(line))
-      .filter((line) => !/^x$/i.test(line))
-      .filter((line) => !/^…$|^\.\.\.$/.test(line))
-      .filter((line) => !/^Promoted$/i.test(line))
-      .filter((line) => !/^Viewed$/i.test(line))
-      .filter((line) => !/^Saved$/i.test(line))
-      .join("\n");
-  }
-
   function findLikelyListContainer() {
-    const explicit = LIST_CONTAINER_SELECTORS.flatMap((selector) => safeQueryAll(document, selector)).filter(isVisible);
-    const visibleScrollable = safeQueryAll(document, "body *").filter((el) => {
+    const explicit = LIST_CONTAINER_SELECTORS
+      .flatMap((selector) => safeQueryAll(document, selector))
+      .filter((el) => isVisible(el) && isInLeftResultsArea(el) && !isBadCardText(textOf(el)));
+
+    const scrollableLeftPanes = safeQueryAll(document, "body *").filter((el) => {
+      if (!isVisible(el) || !isInLeftResultsArea(el)) return false;
       const rect = rectOf(el);
-      if (!isVisible(el)) return false;
-      if (rect.width < 240 || rect.width > 720 || rect.height < 250) return false;
-      if (rect.right > window.innerWidth * 0.62) return false;
+      if (rect.width < 260 || rect.width > 650 || rect.height < 250) return false;
+      if (rect.top > window.innerHeight * 0.55) return false;
+      const text = textOf(el);
+      if (isBadCardText(text) && !ROLE_WORDS.test(text)) return false;
       const scrollable = el.scrollHeight > el.clientHeight + 80;
-      const jobLinks = safeQueryAll(el, "a[href*='/jobs/view/'], a[href*='currentJobId=']").length;
-      return scrollable || jobLinks >= 2;
+      const jobIds = safeQueryAll(el, "[data-job-id], [data-occludable-job-id]").length;
+      const links = jobLinksIn(el).length;
+      const jobClassHits = safeQueryAll(el, ".job-card-container, li.jobs-search-results__list-item, li.scaffold-layout__list-item").length;
+      return scrollable || jobIds >= 2 || links >= 2 || jobClassHits >= 2;
     });
 
-    const candidates = [...new Set([...explicit, ...visibleScrollable])];
+    const candidates = [...new Set([...explicit, ...scrollableLeftPanes])];
     let best = null;
     let bestScore = -Infinity;
 
     for (const el of candidates) {
       const rect = rectOf(el);
-      // Prefer the left results pane, not the right job-detail pane.
-      const isClearlyLeftPane = rect.right <= window.innerWidth * 0.62;
-      const jobLinks = safeQueryAll(el, "a[href*='/jobs/view/'], a[href*='currentJobId=']").length;
-      const textLen = textOf(el).length;
-      const scrollBonus = el.scrollHeight > el.clientHeight + 80 ? 30 : 0;
-      const leftBonus = isClearlyLeftPane ? 100 : -100;
-      const sizePenalty = rect.height > window.innerHeight * 0.95 && rect.width > window.innerWidth * 0.75 ? -150 : 0;
-      const score = leftBonus + scrollBonus + jobLinks * 25 + Math.min(textLen / 120, 30) + sizePenalty;
+      const text = textOf(el);
+      const jobIds = safeQueryAll(el, "[data-job-id], [data-occludable-job-id]").length;
+      const links = jobLinksIn(el).length;
+      const jobClassHits = safeQueryAll(el, ".job-card-container, li.jobs-search-results__list-item, li.scaffold-layout__list-item").length;
+      const roleHits = lines(text).filter((line) => ROLE_WORDS.test(line)).length;
+      const scrollBonus = el.scrollHeight > el.clientHeight + 80 ? 50 : 0;
+      const compactLeftBonus = rect.left < window.innerWidth * 0.2 && rect.right < window.innerWidth * 0.5 ? 80 : 0;
+      const noisePenalty = isBadCardText(text) ? -200 : 0;
+      const score = compactLeftBonus + scrollBonus + jobIds * 50 + links * 35 + jobClassHits * 30 + roleHits * 8 + Math.min(rect.height / 10, 60) + noisePenalty;
       if (score > bestScore) {
         bestScore = score;
         best = el;
       }
     }
 
-    return best || document.body;
+    return best;
   }
 
-  function isLikelyJobCard(el) {
-    if (!isVisible(el)) return false;
-    const rect = rectOf(el);
-    if (rect.width < 180 || rect.height < 35 || rect.height > 320) return false;
-    const rawLines = lines(normalizeCardText(el));
-    if (rawLines.length < 2) return false;
-    const hasJobHint = Boolean(
-      getJobIdFromElement(el) ||
-      safeQueryAll(el, "a[href*='/jobs/view/'], a[href*='currentJobId=']").length ||
-      /remote|on-site|hybrid|applicant|ago|company alumni|school alumni|viewed|promoted|Berlin|Munich|Hamburg|Germany/i.test(rawLines.join(" "))
-    );
-    return hasJobHint;
+  function cleanCardLines(card) {
+    const raw = lines(normalizeCardText(card));
+    const out = [];
+    for (const line of raw) {
+      if (isNoiseLine(line)) continue;
+      if (/^promoted$/i.test(line)) continue;
+      if (/^viewed$/i.test(line)) continue;
+      if (/^saved$/i.test(line)) continue;
+      if (/^apply$/i.test(line)) continue;
+      if (out[out.length - 1] !== line) out.push(line);
+    }
+    return out;
   }
 
   function nearestCardFromLink(link, listRoot) {
-    const obvious = link.closest(JOB_CARD_SELECTORS.join(","));
-    if (obvious && (!listRoot || listRoot.contains(obvious)) && isLikelyJobCard(obvious)) return obvious;
+    const preferred = link.closest("li[data-occludable-job-id], li.jobs-search-results__list-item, li.scaffold-layout__list-item, .job-card-container, [data-job-id]");
+    if (preferred && isInLeftResultsArea(preferred) && (!listRoot || listRoot.contains(preferred))) return preferred;
 
     let current = link;
     for (let depth = 0; current && current !== document.body && depth < 10; depth += 1) {
       if (listRoot && !listRoot.contains(current)) break;
-      if (isLikelyJobCard(current)) return current;
       const rect = rectOf(current);
-      if (rect.height > 340 || rect.width > 760) break;
+      if (isInLeftResultsArea(current) && rect.height >= 45 && rect.height <= 280 && rect.width >= 220 && rect.width <= 650) {
+        return current;
+      }
+      if (rect.height > 330 || rect.width > 760) break;
       current = current.parentElement;
     }
     return null;
   }
 
-  function collectJobCardCandidates(listRoot) {
+  function collectStructuredCardCandidates(listRoot) {
     const candidates = new Set();
-    const roots = [listRoot];
-    if (listRoot !== document.body) roots.push(document.body);
+    const roots = listRoot ? [listRoot] : [document];
 
     for (const root of roots) {
       for (const selector of JOB_CARD_SELECTORS) {
         for (const el of safeQueryAll(root, selector)) {
-          if (isLikelyJobCard(el)) candidates.add(el);
+          const card = el.closest("li[data-occludable-job-id], li.jobs-search-results__list-item, li.scaffold-layout__list-item") || el;
+          if (isInLeftResultsArea(card)) candidates.add(card);
         }
       }
 
-      // Chrome supports :has(), but keep it isolated so older Chromium forks do not break the extension.
-      for (const selector of JOB_CARD_HAS_SELECTORS) {
-        for (const el of safeQueryAll(root, selector)) {
-          if (isLikelyJobCard(el)) candidates.add(el);
-        }
-      }
-
-      for (const link of safeQueryAll(root, "a[href*='/jobs/view/'], a[href*='currentJobId=']").filter(isVisible)) {
-        const card = nearestCardFromLink(link, root);
+      for (const link of jobLinksIn(root).filter(isVisible)) {
+        if (!isInLeftResultsArea(link)) continue;
+        const card = nearestCardFromLink(link, root === document ? null : root);
         if (card) candidates.add(card);
       }
     }
@@ -261,8 +323,11 @@
     return [...candidates]
       .filter((el) => {
         const rect = rectOf(el);
-        // Keep cards in the results column. This prevents the open job details pane from being read as a list item.
-        return rect.right <= window.innerWidth * 0.68 || (listRoot !== document.body && listRoot.contains(el));
+        const text = textOf(el);
+        if (!isVisible(el) || !isInLeftResultsArea(el)) return false;
+        if (rect.height < 35 || rect.height > 330 || rect.width < 180) return false;
+        if (isBadCardText(text)) return false;
+        return true;
       })
       .sort((a, b) => rectOf(a).top - rectOf(b).top);
   }
@@ -271,77 +336,154 @@
     if (!link) return "";
     const direct = textOf(link);
     const aria = clean(link.getAttribute("aria-label") || link.getAttribute("title") || "");
-    const value = direct || aria;
-    return lines(value)
-      .filter((line) => !/^(view job|opens in a new tab|apply)$/i.test(line))
-      .join(" ");
+    const values = lines(direct || aria)
+      .filter((line) => !/^(view job|opens in a new tab|apply|save|more)$/i.test(line))
+      .filter((line) => !isNoiseLine(line));
+    return values.join(" ");
+  }
+
+  function pickTitle(rawLines, card) {
+    const titleBySelector = clean(textFrom(card, [
+      ".job-card-list__title--link",
+      ".job-card-list__title",
+      ".job-card-container__link strong",
+      ".job-card-container__link",
+      ".artdeco-entity-lockup__title",
+      "[data-testid*='job-title']",
+      "strong"
+    ]));
+
+    const titleLink = jobLinksIn(card).find((a) => meaningfulTextFromLink(a));
+    const linkTextLines = lines(meaningfulTextFromLink(titleLink));
+    const selectorLines = lines(titleBySelector);
+    const pools = [selectorLines, linkTextLines, rawLines];
+
+    for (const pool of pools) {
+      const roleLine = pool.find((line) => !isNoiseLine(line) && !META_LINE_RE.test(line) && ROLE_WORDS.test(line));
+      if (roleLine) return roleLine;
+    }
+
+    for (const pool of pools) {
+      const candidate = pool.find((line) => !isNoiseLine(line) && !META_LINE_RE.test(line) && !LOCATION_LINE_RE.test(line));
+      if (candidate) return candidate;
+    }
+
+    return rawLines[0] || "";
+  }
+
+  function nextUsefulLineAfter(rawLines, anchor, predicate = () => true) {
+    const index = rawLines.findIndex((line) => line === anchor || anchor.includes(line) || line.includes(anchor));
+    const start = index >= 0 ? index + 1 : 0;
+    for (let i = start; i < rawLines.length; i += 1) {
+      const line = rawLines[i];
+      if (isNoiseLine(line) || META_LINE_RE.test(line)) continue;
+      if (predicate(line)) return line;
+    }
+    return "";
+  }
+
+  function pickCompany(rawLines, card, title) {
+    const fromSelector = clean(textFrom(card, [
+      ".job-card-container__primary-description",
+      ".artdeco-entity-lockup__subtitle",
+      ".job-card-container__company-name",
+      "[data-testid*='company']"
+    ]));
+    const selected = lines(fromSelector).find((line) => line !== title && !isNoiseLine(line) && !META_LINE_RE.test(line));
+    if (selected) return selected;
+
+    return nextUsefulLineAfter(rawLines, title, (line) => line !== title && !LOCATION_LINE_RE.test(line) && !ROLE_WORDS.test(line));
+  }
+
+  function pickLocation(rawLines, card, company) {
+    const fromSelector = clean(textFrom(card, [
+      ".job-card-container__metadata-item",
+      ".artdeco-entity-lockup__caption",
+      "[data-testid*='location']"
+    ]));
+    const selected = lines(fromSelector).find((line) => LOCATION_LINE_RE.test(line));
+    if (selected) return selected;
+
+    const afterCompany = company ? nextUsefulLineAfter(rawLines, company, (line) => LOCATION_LINE_RE.test(line)) : "";
+    if (afterCompany) return afterCompany;
+    return rawLines.find((line) => LOCATION_LINE_RE.test(line)) || "";
   }
 
   function extractJobFromCard(card) {
-    const rawLines = lines(normalizeCardText(card));
+    const rawLines = cleanCardLines(card);
     if (rawLines.length < 2) return null;
+    const rawText = rawLines.join(" | ");
+    if (isBadCardText(rawText)) return null;
 
-    const titleLink = safeQueryAll(card, "a[href*='/jobs/view/'], a[href*='currentJobId=']")
-      .find((a) => meaningfulTextFromLink(a));
-
-    const title = clean(
-      textFrom(card, [
-        ".job-card-list__title--link",
-        ".job-card-list__title",
-        ".job-card-container__link strong",
-        ".job-card-container__link",
-        ".artdeco-entity-lockup__title",
-        "[data-testid*='job-title']"
-      ]) || meaningfulTextFromLink(titleLink) || rawLines[0]
-    );
-
-    const titleWords = new Set(lines(title).join(" ").toLowerCase().split(/\s+/).filter(Boolean));
-
-    const company = clean(
-      textFrom(card, [
-        ".job-card-container__primary-description",
-        ".artdeco-entity-lockup__subtitle",
-        ".job-card-container__company-name",
-        "[data-testid*='company']"
-      ]) || rawLines.find((line) => {
-        const lower = line.toLowerCase();
-        return line !== title && !/applicant|ago|promoted|remote|on-site|hybrid|viewed|saved|alumni|easy apply/i.test(lower);
-      }) || ""
-    );
-
-    const locationText = clean(
-      textFrom(card, [
-        ".job-card-container__metadata-item",
-        ".artdeco-entity-lockup__caption",
-        "[data-testid*='location']"
-      ]) || rawLines.find((line) => /remote|on-site|hybrid|area|berlin|munich|hamburg|germany|frankfurt|cologne|düsseldorf|stuttgart|hannover|dingolfing|wolfsburg|weez|kaufbeuren/i.test(line)) || ""
-    );
-
+    const title = clean(pickTitle(rawLines, card));
+    const company = clean(pickCompany(rawLines, card, title));
+    const locationText = clean(pickLocation(rawLines, card, company));
     const link = hrefFrom(card);
+    const hasJobIdentity = Boolean(link || getJobIdFromElement(card) || jobLinksIn(card).length);
+    const hasJobSignals = hasJobIdentity || ROLE_WORDS.test(title) || rawLines.some((line) => META_LINE_RE.test(line) || LOCATION_LINE_RE.test(line));
+
+    if (!title || title.length < 3) return null;
+    if (isNoiseLine(title) || isBadCardText(title)) return null;
+    if (!hasJobSignals) return null;
+    if (!hasJobIdentity && !ROLE_WORDS.test(title)) return null;
+
     const notes = rawLines
       .filter((line) => line !== title && line !== company && line !== locationText)
-      .filter((line) => !/^apply$/i.test(line))
+      .filter((line) => !isNoiseLine(line))
       .filter((line, index, arr) => arr.indexOf(line) === index)
       .slice(0, 8)
       .join("; ");
 
-    const titleTokenOverlap = rawLines[0]
-      ? rawLines[0].toLowerCase().split(/\s+/).filter((word) => titleWords.has(word)).length
-      : 0;
+    return { title, company, locationText, link, notes, raw: rawText };
+  }
 
-    if (!title || title.length < 3) return null;
-    if (!link && !getJobIdFromElement(card) && titleTokenOverlap === 0 && rawLines.length < 3) return null;
+  function collectFallbackRows(listRoot) {
+    if (!listRoot) return [];
+    const possibleRows = safeQueryAll(listRoot, "li, div")
+      .filter((el) => {
+        const rect = rectOf(el);
+        const text = textOf(el);
+        if (!isVisible(el) || !isInLeftResultsArea(el)) return false;
+        if (rect.height < 45 || rect.height > 260 || rect.width < 220 || rect.width > 650) return false;
+        if (isBadCardText(text)) return false;
+        const rowLines = cleanCardLines(el);
+        if (rowLines.length < 2 || rowLines.length > 16) return false;
+        return ROLE_WORDS.test(rowLines[0]) || rowLines.some((line) => ROLE_WORDS.test(line));
+      })
+      .sort((a, b) => rectOf(a).top - rectOf(b).top);
 
-    return { title, company, locationText, link, notes, raw: rawLines.join(" | ") };
+    // Keep outermost useful rows only; nested title/company nodes should not duplicate the same job.
+    return possibleRows.filter((row) => !possibleRows.some((other) => other !== row && other.contains(row) && Math.abs(rectOf(other).height - rectOf(row).height) < 35));
+  }
+
+  function parseLineFallback(listRoot) {
+    if (!listRoot) return [];
+    const rawLines = lines(normalizeCardText(listRoot))
+      .filter((line) => !isNoiseLine(line))
+      .filter((line) => !/^\d+ results?$/i.test(line));
+    const jobs = [];
+
+    for (let i = 0; i < rawLines.length - 1 && jobs.length < 60; i += 1) {
+      const title = rawLines[i];
+      if (!ROLE_WORDS.test(title)) continue;
+      const company = rawLines.slice(i + 1, i + 4).find((line) => !META_LINE_RE.test(line) && !LOCATION_LINE_RE.test(line) && !ROLE_WORDS.test(line)) || "";
+      const locationText = rawLines.slice(i + 1, i + 5).find((line) => LOCATION_LINE_RE.test(line)) || "";
+      if (!company && !locationText) continue;
+      const notes = rawLines.slice(i + 1, i + 7).filter((line) => line !== company && line !== locationText).join("; ");
+      jobs.push({ title, company, locationText, link: "", notes, raw: rawLines.slice(i, i + 7).join(" | ") });
+    }
+    return jobs;
   }
 
   function extractJobCards() {
     const listRoot = findLikelyListContainer();
-    const candidates = collectJobCardCandidates(listRoot);
+    const candidates = collectStructuredCardCandidates(listRoot);
+    const rowFallbacks = candidates.length ? [] : collectFallbackRows(listRoot);
+    const allCandidates = [...candidates, ...rowFallbacks];
     const seenKeys = new Set();
     const jobs = [];
 
-    for (const card of candidates) {
+    for (const card of allCandidates) {
       const job = extractJobFromCard(card);
       if (!job) continue;
       const key = clean(`${job.title}|${job.company}|${job.locationText}|${job.link || job.raw}`.toLowerCase());
@@ -350,18 +492,12 @@
       jobs.push(job);
     }
 
-    // Last-resort fallback: parse the left results pane line-by-line so the user still gets useful text.
-    if (!jobs.length && listRoot && listRoot !== document.body) {
-      const rawLines = lines(normalizeCardText(listRoot));
-      for (let i = 0; i < rawLines.length - 1 && jobs.length < 40; i += 1) {
-        const title = rawLines[i];
-        const company = rawLines[i + 1] || "";
-        const locationText = rawLines[i + 2] || "";
-        if (!title || /results|job search alert|premium|helpful|feedback|about|privacy|accessibility/i.test(title)) continue;
-        if (/ago|applicant|alumni|promoted|viewed|saved/i.test(title)) continue;
-        if (title.length < 4 || company.length < 2) continue;
-        jobs.push({ title, company, locationText, link: "", notes: rawLines.slice(i + 3, i + 6).join("; "), raw: rawLines.slice(i, i + 6).join(" | ") });
-        i += 2;
+    if (!jobs.length) {
+      for (const job of parseLineFallback(listRoot)) {
+        const key = clean(`${job.title}|${job.company}|${job.locationText}|${job.raw}`.toLowerCase());
+        if (seenKeys.has(key)) continue;
+        seenKeys.add(key);
+        jobs.push(job);
       }
     }
 
@@ -393,16 +529,16 @@
 
   function findDetailContainer() {
     const candidates = DETAIL_CONTAINER_SELECTORS.flatMap((selector) => safeQueryAll(document, selector)).filter(isVisible);
-    // Prefer the visible details pane on the right, not the whole page.
     return candidates
       .map((el) => {
         const rect = rectOf(el);
         const text = textOf(el);
         const score =
-          rect.width * rect.height +
+          Math.min(rect.width * rect.height, 1200000) +
           (/About the job|About this job|Job description/i.test(text) ? 500000 : 0) +
           (rect.left > window.innerWidth * 0.25 ? 250000 : 0) -
-          (rect.width > window.innerWidth * 0.9 ? 800000 : 0);
+          (rect.width > window.innerWidth * 0.9 ? 800000 : 0) -
+          (rect.right < window.innerWidth * 0.55 ? 700000 : 0);
         return { el, score };
       })
       .sort((a, b) => b.score - a.score)[0]?.el || document.body;
@@ -411,7 +547,6 @@
   function selectedText() {
     const selection = window.getSelection?.();
     const text = clean(selection?.toString() || "");
-    // If the user highlights exact text, use that instead of guessing. Do not use tiny accidental selections.
     return text.length >= 25 ? text : "";
   }
 
@@ -426,53 +561,68 @@
       .sort((a, b) => textOf(b).length - textOf(a).length)[0] || null;
   }
 
-  function looksLikeMoreButton(el) {
-    const text = textOf(el).toLowerCase();
-    const aria = clean(el.getAttribute?.("aria-label") || "").toLowerCase();
-    const combined = `${text} ${aria}`.trim();
-    if (!combined || combined.length > 120) return false;
-    if (/show less|see less|less/i.test(combined)) return false;
-    return /(^|\s)(show|see)?\s*(more|mehr)($|\s)|…\s*more|\.\.\.\s*more|show more|see more|mehr anzeigen/i.test(combined);
+  function findDescriptionSection(container) {
+    const descriptionNode = findDescriptionNode(container);
+    if (!descriptionNode) return null;
+    return descriptionNode.closest(".jobs-description, .jobs-box, section, article") || descriptionNode.parentElement || descriptionNode;
   }
 
-  async function clickMoreButtons(container) {
-    const roots = [container, document.body];
-    const clickable = new Set();
+  function looksLikeDescriptionMoreButton(el, descriptionSection) {
+    const text = textOf(el).toLowerCase();
+    const aria = clean(el.getAttribute?.("aria-label") || "").toLowerCase();
+    const title = clean(el.getAttribute?.("title") || "").toLowerCase();
+    const combined = `${text} ${aria} ${title}`.trim();
+    if (!combined || combined.length > 140) return false;
+    if (/more actions|report|share|send in a message|message|show less|see less|less/i.test(combined)) return false;
+    if (!/(^|\s)(show|see)?\s*(more|mehr)($|\s)|…\s*more|\.\.\.\s*more|mehr anzeigen/i.test(combined)) return false;
 
-    for (const root of roots) {
-      for (const el of safeQueryAll(root, "button, [role='button'], a, span")) {
-        if (!isVisible(el) || !looksLikeMoreButton(el)) continue;
-        const button = el.closest("button, [role='button'], a") || el;
-        if (button) clickable.add(button);
-      }
+    // Only expand controls that live in/next to the job description. This prevents LinkedIn's top-card
+    // "More" menu from opening and prevents the page/list from scrolling.
+    if (descriptionSection && !descriptionSection.contains(el)) {
+      const descRect = rectOf(descriptionSection);
+      const buttonRect = rectOf(el);
+      const nearDescription =
+        buttonRect.left >= descRect.left - 30 &&
+        buttonRect.right <= descRect.right + 220 &&
+        buttonRect.top >= descRect.top - 40 &&
+        buttonRect.top <= descRect.bottom + 120;
+      if (!nearDescription) return false;
+    }
+
+    return true;
+  }
+
+  async function clickDescriptionMoreButtons(container) {
+    const descriptionSection = findDescriptionSection(container);
+    if (!descriptionSection) return 0;
+
+    const clickable = new Set();
+    for (const el of safeQueryAll(descriptionSection, "button, [role='button'], a, span")) {
+      if (!isVisible(el) || !looksLikeDescriptionMoreButton(el, descriptionSection)) continue;
+      const button = el.closest("button, [role='button'], a") || el;
+      if (button && descriptionSection.contains(button)) clickable.add(button);
     }
 
     let clicked = 0;
     for (const button of clickable) {
       try {
-        button.scrollIntoView?.({ block: "center", inline: "nearest" });
         button.click();
         clicked += 1;
-        await sleep(180);
+        await sleep(160);
       } catch (_) {
-        // Ignore buttons that LinkedIn intercepts or removes while expanding.
+        // LinkedIn may remove/re-render the button while expanding.
       }
     }
     return clicked;
   }
 
   async function expandHiddenJobDescription(container) {
-    // LinkedIn often truncates the job description behind a "… more" / "Show more" control.
-    // Scroll the detail pane and description area, then click all matching controls twice because
-    // LinkedIn sometimes re-renders the button after the first click.
+    // Deliberately do not call scrollIntoView() or scroll the list/page. Only click the small "… more"
+    // button inside the job-description section, if LinkedIn rendered one.
     for (let pass = 0; pass < 3; pass += 1) {
-      const descriptionNode = findDescriptionNode(container);
-      try {
-        if (descriptionNode) descriptionNode.scrollTop = descriptionNode.scrollHeight;
-        if (container && container !== document.body) container.scrollTop = container.scrollHeight;
-      } catch (_) {}
-      await clickMoreButtons(container);
-      await sleep(220);
+      const clicked = await clickDescriptionMoreButtons(container);
+      if (!clicked) break;
+      await sleep(250);
     }
   }
 
@@ -486,7 +636,11 @@
       /^See how you compare/i,
       /^Your profile and resume/i,
       /^Show match details$/i,
-      /^BETA\b/i
+      /^BETA\b/i,
+      /^Send in a message$/i,
+      /^Share in a post$/i,
+      /^Share$/i,
+      /^Report this job$/i
     ];
 
     const removePatterns = [
@@ -496,6 +650,7 @@
       /^show less$/i,
       /^see more$/i,
       /^see less$/i,
+      /^mehr anzeigen$/i,
       /^Skip to main content$/i,
       /^LinkedIn$/i
     ];
@@ -517,7 +672,7 @@
     const allLines = lines(container.innerText);
     const start = allLines.findIndex((line) => /^About the job$/i.test(line) || /^About this job$/i.test(line) || /^Job description$/i.test(line));
     if (start >= 0) return filterDescriptionText(allLines.slice(start).join("\n"));
-    return filterDescriptionText(allLines.slice(0, 160).join("\n"));
+    return filterDescriptionText(allLines.slice(0, 180).join("\n"));
   }
 
   async function getOpenJobDetails() {

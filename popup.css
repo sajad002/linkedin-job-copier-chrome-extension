@@ -4,7 +4,7 @@
 }
 
 body {
-  width: 320px;
+  width: 350px;
   margin: 0;
   background: Canvas;
   color: CanvasText;
@@ -48,12 +48,67 @@ button:disabled {
   cursor: wait;
 }
 
+button.secondary {
+  border: 1px solid color-mix(in srgb, CanvasText 22%, Canvas 78%);
+  background: color-mix(in srgb, CanvasText 8%, Canvas 92%);
+  color: CanvasText;
+}
+
+button.small {
+  width: auto;
+  padding: 7px 10px;
+  border-radius: 8px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.prompt-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 9px;
+}
+
 .checkbox-row {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-top: 10px;
   font-size: 13px;
+}
+
+.prompt-editor {
+  margin-top: 10px;
+  padding: 10px;
+  border: 1px solid color-mix(in srgb, CanvasText 16%, Canvas 84%);
+  border-radius: 10px;
+  background: color-mix(in srgb, CanvasText 5%, Canvas 95%);
+}
+
+.prompt-editor label {
+  display: block;
+  margin-bottom: 8px;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+textarea {
+  box-sizing: border-box;
+  width: 100%;
+  margin-top: 5px;
+  padding: 8px;
+  border: 1px solid color-mix(in srgb, CanvasText 18%, Canvas 82%);
+  border-radius: 8px;
+  background: Canvas;
+  color: CanvasText;
+  font: 12px/1.35 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  resize: vertical;
+}
+
+.button-row {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
 }
 
 #status {

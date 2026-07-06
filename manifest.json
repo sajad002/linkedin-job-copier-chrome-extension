@@ -1,12 +1,13 @@
 {
   "manifest_version": 3,
   "name": "LinkedIn Job Copier",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Copy LinkedIn job result lists and expanded open job details for GPT analysis.",
   "permissions": [
     "activeTab",
     "scripting",
-    "clipboardWrite"
+    "clipboardWrite",
+    "storage"
   ],
   "host_permissions": [
     "https://www.linkedin.com/jobs/*"
