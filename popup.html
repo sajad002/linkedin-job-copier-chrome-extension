@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>LinkedIn Job Copier</title>
+  <link rel="stylesheet" href="popup.css" />
+</head>
+<body>
+  <main>
+    <h1>LinkedIn Job Copier</h1>
+    <p class="hint">Open a LinkedIn Jobs search page, then choose what to copy for GPT analysis.</p>
+
+    <button id="copyList" type="button">Copy positions list</button>
+    <button id="copyDetails" type="button">Copy open position info</button>
+
+    <label class="checkbox-row">
+      <input id="includePrompt" type="checkbox" checked />
+      Add GPT analysis prompt
+    </label>
+
+    <div id="status" role="status" aria-live="polite"></div>
+  </main>
+  <script src="popup.js"></script>
+</body>
+</html>
