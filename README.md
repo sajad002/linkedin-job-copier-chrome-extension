@@ -35,7 +35,14 @@ A small Chrome Manifest V3 extension for copying LinkedIn Jobs data into GPT.
 
 ## Screenshots
 
-<p align="center">
-  <img src="screenshots/popup-main.png" width="320" alt="LinkedIn Job Copier main popup">
-  <img src="screenshots/prompt-editor.png" width="320" alt="LinkedIn Job Copier prompt editor">
-</p>
+<table align="center">
+  <tr>
+    <td>
+      <img src="screenshots/popup-main.png" width="320" alt="LinkedIn Job Copier main popup">
+    </td>
+    <td width="24"></td>
+    <td>
+      <img src="screenshots/prompt-editor.png" width="320" alt="LinkedIn Job Copier prompt editor">
+    </td>
+  </tr>
+</table>
