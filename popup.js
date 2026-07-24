@@ -1,6 +1,8 @@
 const statusBox = document.getElementById("status");
 const copyListBtn = document.getElementById("copyList");
 const copyDetailsBtn = document.getElementById("copyDetails");
+const removeListedBtn = document.getElementById("removeListed");
+const copySafeNamesBtn = document.getElementById("copySafeNames");
 const includePromptBox = document.getElementById("includePrompt");
 const editPromptsBtn = document.getElementById("editPrompts");
 const promptEditor = document.getElementById("promptEditor");
@@ -24,6 +26,8 @@ function setStatus(message, type = "") {
 function setBusy(isBusy) {
   copyListBtn.disabled = isBusy;
   copyDetailsBtn.disabled = isBusy;
+  removeListedBtn.disabled = isBusy;
+  copySafeNamesBtn.disabled = isBusy;
   editPromptsBtn.disabled = isBusy;
 }
 
@@ -57,7 +61,10 @@ async function getActiveLinkedInTab() {
 
 async function ensureContentScript(tabId) {
   try {
-    await chrome.tabs.sendMessage(tabId, { type: "PING" });
+    const response = await chrome.tabs.sendMessage(tabId, { type: "PING_V130" });
+    if (!response?.ok || response.version !== "1.3.0") {
+      throw new Error("Old content script detected.");
+    }
   } catch (_) {
     await chrome.scripting.executeScript({ target: { tabId }, files: ["content.js"] });
   }
@@ -66,7 +73,20 @@ async function ensureContentScript(tabId) {
 async function getTextFromPage(type) {
   const tab = await getActiveLinkedInTab();
   await ensureContentScript(tab.id);
-  const response = await chrome.tabs.sendMessage(tab.id, { type });
+
+  const [injection] = await chrome.scripting.executeScript({
+    target: { tabId: tab.id },
+    args: [type],
+    func: async (actionType) => {
+      const api = window.__linkedinJobCopierV130Api;
+      if (!api || api.version !== "1.3.0") {
+        return { ok: false, error: "LinkedIn Job Copier v1.3.0 is not active in this tab. Reload the LinkedIn tab and try again." };
+      }
+      return await api.handle(actionType);
+    }
+  });
+
+  const response = injection?.result;
   if (!response?.ok) {
     throw new Error(response?.error || "Could not read the LinkedIn page.");
   }
@@ -93,6 +113,41 @@ async function handleCopy(type, promptType) {
     setStatus(`Copied to clipboard${suffix}. Paste it into GPT.`, "ok");
   } catch (error) {
     setStatus(`${error.message}\n\nTip: reload the LinkedIn tab after installing or updating the extension.`, "error");
+  } finally {
+    setBusy(false);
+  }
+}
+
+async function handleCopySafeNames() {
+  setBusy(true);
+  setStatus("Reading visible LinkedIn job cards...");
+  try {
+    const response = await getTextFromPage("COPY_SAFE_JOB_NAMES");
+    await copyText(response.text);
+    const suffix = response.count ? ` (${response.count} item${response.count === 1 ? "" : "s"})` : "";
+    setStatus(`Copied directory-safe names${suffix}. Use one line per folder name.`, "ok");
+  } catch (error) {
+    setStatus(`${error.message}
+
+Tip: reload the LinkedIn tab after installing or updating the extension.`, "error");
+  } finally {
+    setBusy(false);
+  }
+}
+
+async function handleRemoveListedJobs() {
+  setBusy(true);
+  setStatus("Clicking X on visible listed positions...");
+  try {
+    const response = await getTextFromPage("REMOVE_LISTED_JOBS");
+    const removed = response.removed || response.count || 0;
+    const skipped = response.skipped || 0;
+    const skippedText = skipped ? ` ${skipped} card${skipped === 1 ? "" : "s"} had no visible X/dismiss button.` : "";
+    setStatus(`Clicked X on ${removed} listed position${removed === 1 ? "" : "s"}.${skippedText}`, "ok");
+  } catch (error) {
+    setStatus(`${error.message}
+
+Tip: reload the LinkedIn tab after installing or updating the extension.`, "error");
   } finally {
     setBusy(false);
   }
@@ -125,6 +180,8 @@ resetPromptsBtn.addEventListener("click", async () => {
 
 copyListBtn.addEventListener("click", () => handleCopy("COPY_JOB_LIST", "list"));
 copyDetailsBtn.addEventListener("click", () => handleCopy("COPY_JOB_DETAILS", "details"));
+removeListedBtn.addEventListener("click", handleRemoveListedJobs);
+copySafeNamesBtn.addEventListener("click", handleCopySafeNames);
 
 loadSettings()
   .then(() => setStatus("Ready."))

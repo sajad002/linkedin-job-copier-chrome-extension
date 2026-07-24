@@ -1,6 +1,6 @@
 (() => {
-  if (window.__linkedinJobCopierInstalledV120) return;
-  window.__linkedinJobCopierInstalledV120 = true;
+  if (window.__linkedinJobCopierInstalledV130) return;
+  window.__linkedinJobCopierInstalledV130 = true;
 
   const JOB_CARD_SELECTORS = [
     "li[data-occludable-job-id]",
@@ -527,6 +527,126 @@
     return `${header.join("\n")}\n\n${body}`;
   }
 
+  function sanitizeDirectoryName(value) {
+    let out = clean(value)
+      .replace(/[\r\n\t]+/g, " ")
+      .replace(/[\\/:\u0000*?"<>|]+/g, " ")
+      .replace(/[;`!#$%^&={}\[\]~]+/g, " ")
+      .replace(/\s*[-–—]+\s*/g, " - ")
+      .replace(/\s+/g, " ")
+      .replace(/^[-.\s]+|[-.\s]+$/g, "")
+      .trim();
+
+    // Avoid hidden/parent-directory-looking names and keep folder names practical.
+    out = out.replace(/^\.+/, "").trim();
+    if (out.length > 150) out = out.slice(0, 150).replace(/\s+\S*$/, "").trim();
+    return out || "LinkedIn job";
+  }
+
+  function formatSafeJobNames(jobs) {
+    return jobs
+      .map((job) => sanitizeDirectoryName([job.company, job.title].filter(Boolean).join(" - ")))
+      .filter(Boolean)
+      .filter((name, index, arr) => arr.indexOf(name) === index)
+      .join("\n");
+  }
+
+  function buttonLabel(el) {
+    return clean([
+      el?.innerText,
+      el?.textContent,
+      el?.getAttribute?.("aria-label"),
+      el?.getAttribute?.("title"),
+      el?.getAttribute?.("data-control-name")
+    ].filter(Boolean).join(" "));
+  }
+
+  function looksLikeDismissButton(button, card) {
+    if (!button || !isVisible(button)) return false;
+    if (button.disabled || button.getAttribute?.("aria-disabled") === "true") return false;
+
+    const label = buttonLabel(button).toLowerCase();
+    if (/undo|save|saved|apply|share|message|report|more|open|view|premium|alumni|helpful|feedback/.test(label)) return false;
+    if (/dismiss|remove|hide|close|not interested|not show|don.t show|won.t recommend|we won.t recommend|entfernen|ausblenden|schlie.en|nicht mehr anzeigen/.test(label)) return true;
+    if (/^(x|×|✕|✖)$/.test(label)) return true;
+
+    const closeIcon = button.querySelector?.("li-icon[type*='close' i], li-icon[type*='cancel' i], svg[aria-label*='close' i], svg[aria-label*='dismiss' i], [data-test-icon*='close' i], [data-test-icon*='dismiss' i]");
+    if (closeIcon) return true;
+
+    // Fallback for LinkedIn's small icon-only X in the right side of each job card.
+    const cardRect = rectOf(card);
+    const buttonRect = rectOf(button);
+    const smallButton = buttonRect.width > 8 && buttonRect.width <= 58 && buttonRect.height > 8 && buttonRect.height <= 58;
+    const onRightSide = buttonRect.left >= cardRect.left + cardRect.width * 0.72;
+    const notTooLow = buttonRect.top <= cardRect.top + Math.max(78, cardRect.height * 0.55);
+    const iconOnly = !label || label.length <= 2;
+    return smallButton && onRightSide && notTooLow && iconOnly;
+  }
+
+  function findDismissButton(card) {
+    const controls = safeQueryAll(card, "button, [role='button'], a")
+      .map((el) => el.closest?.("button, [role='button'], a") || el)
+      .filter((el, index, arr) => el && arr.indexOf(el) === index)
+      .filter((el) => card.contains(el) && looksLikeDismissButton(el, card));
+
+    if (!controls.length) return null;
+
+    return controls.sort((a, b) => {
+      const labelA = buttonLabel(a).toLowerCase();
+      const labelB = buttonLabel(b).toLowerCase();
+      const rectA = rectOf(a);
+      const rectB = rectOf(b);
+      const score = (label, rect) =>
+        (/dismiss|remove|hide|close|not interested|won.t recommend|entfernen|ausblenden/.test(label) ? 100 : 0) +
+        (/^(x|×|✕|✖)$/.test(label) ? 60 : 0) +
+        (rect.left / Math.max(window.innerWidth, 1)) * 20 -
+        (rect.top / Math.max(window.innerHeight, 1));
+      return score(labelB, rectB) - score(labelA, rectA);
+    })[0];
+  }
+
+  function collectVisibleListedJobCards() {
+    const listRoot = findLikelyListContainer();
+    const candidates = collectStructuredCardCandidates(listRoot);
+    const fallback = candidates.length ? [] : collectFallbackRows(listRoot);
+    const seen = new Set();
+    return [...candidates, ...fallback]
+      .filter((card) => {
+        if (!card || !isVisible(card) || !isInLeftResultsArea(card)) return false;
+        const job = extractJobFromCard(card);
+        if (!job) return false;
+        const key = clean(`${job.title}|${job.company}|${job.locationText}|${hrefFrom(card) || job.raw}`.toLowerCase());
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      })
+      .sort((a, b) => rectOf(a).top - rectOf(b).top);
+  }
+
+  async function removeListedJobs() {
+    const cards = collectVisibleListedJobCards();
+    let removed = 0;
+    let skipped = 0;
+
+    for (const card of cards) {
+      if (!isVisible(card)) continue;
+      const button = findDismissButton(card);
+      if (!button) {
+        skipped += 1;
+        continue;
+      }
+      try {
+        button.click();
+        removed += 1;
+        await sleep(260);
+      } catch (_) {
+        skipped += 1;
+      }
+    }
+
+    return { removed, skipped, total: cards.length };
+  }
+
   function findDetailContainer() {
     const candidates = DETAIL_CONTAINER_SELECTORS.flatMap((selector) => safeQueryAll(document, selector)).filter(isVisible);
     return candidates
@@ -733,43 +853,72 @@
     return { count: 1, text: clean(linesOut.join("\n")) };
   }
 
-  chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-    if (message?.type === "PING") {
-      sendResponse({ ok: true });
-      return false;
+  async function handleRuntimeAction(type) {
+    if (type === "PING" || type === "PING_V130") {
+      return { ok: true, version: "1.3.0" };
     }
 
-    if (message?.type === "COPY_JOB_LIST") {
-      try {
-        const jobs = extractJobCards();
-        if (!jobs.length) {
-          sendResponse({
-            ok: false,
-            error: "No visible LinkedIn job cards were found. Scroll the left results pane slightly, then try again."
-          });
-          return false;
-        }
-        sendResponse({ ok: true, count: jobs.length, text: formatJobList(jobs) });
-      } catch (error) {
-        sendResponse({ ok: false, error: error.message || String(error) });
+    if (type === "COPY_JOB_LIST") {
+      const jobs = extractJobCards();
+      if (!jobs.length) {
+        return {
+          ok: false,
+          error: "No visible LinkedIn job cards were found. Scroll the left results pane slightly, then try again."
+        };
       }
-      return false;
+      return { ok: true, count: jobs.length, text: formatJobList(jobs) };
     }
 
-    if (message?.type === "COPY_JOB_DETAILS") {
-      getOpenJobDetails()
-        .then((details) => {
-          if (!details.text || details.text.length < 80) {
-            sendResponse({ ok: false, error: "Could not find the open job details. Click a job first or highlight the text you want copied." });
-            return;
-          }
-          sendResponse({ ok: true, count: details.count, text: details.text });
-        })
-        .catch((error) => sendResponse({ ok: false, error: error.message || String(error) }));
-      return true;
+    if (type === "COPY_SAFE_JOB_NAMES") {
+      const jobs = extractJobCards();
+      if (!jobs.length) {
+        return {
+          ok: false,
+          error: "No visible LinkedIn job cards were found. Scroll the left results pane slightly, then try again."
+        };
+      }
+      const text = formatSafeJobNames(jobs);
+      return { ok: true, count: text.split("\n").filter(Boolean).length, text };
     }
 
-    sendResponse({ ok: false, error: "Unknown action." });
-    return false;
+    if (type === "REMOVE_LISTED_JOBS") {
+      const result = await removeListedJobs();
+      if (!result.total) {
+        return {
+          ok: false,
+          error: "No visible LinkedIn job cards were found. Scroll the left results pane slightly, then try again."
+        };
+      }
+      if (!result.removed) {
+        return {
+          ok: false,
+          error: "Found job cards, but no visible X/dismiss buttons were detected on them."
+        };
+      }
+      return { ok: true, count: result.removed, removed: result.removed, skipped: result.skipped, total: result.total };
+    }
+
+    if (type === "COPY_JOB_DETAILS") {
+      const details = await getOpenJobDetails();
+      if (!details.text || details.text.length < 80) {
+        return { ok: false, error: "Could not find the open job details. Click a job first or highlight the text you want copied." };
+      }
+      return { ok: true, count: details.count, text: details.text };
+    }
+
+    return { ok: false, error: "Unknown action." };
+  }
+
+  window.__linkedinJobCopierV130Api = {
+    version: "1.3.0",
+    handle: handleRuntimeAction
+  };
+
+  chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+    handleRuntimeAction(message?.type)
+      .then(sendResponse)
+      .catch((error) => sendResponse({ ok: false, error: error.message || String(error) }));
+    return true;
   });
+
 })();

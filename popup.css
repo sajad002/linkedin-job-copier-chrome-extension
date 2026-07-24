@@ -48,6 +48,14 @@ button:disabled {
   cursor: wait;
 }
 
+button.danger {
+  background: #b91c1c;
+}
+
+button.danger:hover {
+  filter: brightness(1.08);
+}
+
 button.secondary {
   border: 1px solid color-mix(in srgb, CanvasText 22%, Canvas 78%);
   background: color-mix(in srgb, CanvasText 8%, Canvas 92%);
