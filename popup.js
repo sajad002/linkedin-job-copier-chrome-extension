@@ -61,8 +61,8 @@ async function getActiveLinkedInTab() {
 
 async function ensureContentScript(tabId) {
   try {
-    const response = await chrome.tabs.sendMessage(tabId, { type: "PING_V130" });
-    if (!response?.ok || response.version !== "1.3.0") {
+    const response = await chrome.tabs.sendMessage(tabId, { type: "PING_V131" });
+    if (!response?.ok || response.version !== "1.3.1") {
       throw new Error("Old content script detected.");
     }
   } catch (_) {
@@ -78,9 +78,9 @@ async function getTextFromPage(type) {
     target: { tabId: tab.id },
     args: [type],
     func: async (actionType) => {
-      const api = window.__linkedinJobCopierV130Api;
-      if (!api || api.version !== "1.3.0") {
-        return { ok: false, error: "LinkedIn Job Copier v1.3.0 is not active in this tab. Reload the LinkedIn tab and try again." };
+      const api = window.__linkedinJobCopierV131Api;
+      if (!api || api.version !== "1.3.1") {
+        return { ok: false, error: "LinkedIn Job Copier v1.3.1 is not active in this tab. Reload the LinkedIn tab and try again." };
       }
       return await api.handle(actionType);
     }
@@ -120,12 +120,12 @@ async function handleCopy(type, promptType) {
 
 async function handleCopySafeNames() {
   setBusy(true);
-  setStatus("Reading visible LinkedIn job cards...");
+  setStatus("Reading open LinkedIn job...");
   try {
-    const response = await getTextFromPage("COPY_SAFE_JOB_NAMES");
+    const response = await getTextFromPage("COPY_OPEN_SAFE_JOB_NAME");
     await copyText(response.text);
     const suffix = response.count ? ` (${response.count} item${response.count === 1 ? "" : "s"})` : "";
-    setStatus(`Copied directory-safe names${suffix}. Use one line per folder name.`, "ok");
+    setStatus(`Copied open job directory-safe name${suffix}.`, "ok");
   } catch (error) {
     setStatus(`${error.message}
 

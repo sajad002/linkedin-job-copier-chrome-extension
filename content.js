@@ -1,6 +1,6 @@
 (() => {
-  if (window.__linkedinJobCopierInstalledV130) return;
-  window.__linkedinJobCopierInstalledV130 = true;
+  if (window.__linkedinJobCopierInstalledV131) return;
+  window.__linkedinJobCopierInstalledV131 = true;
 
   const JOB_CARD_SELECTORS = [
     "li[data-occludable-job-id]",
@@ -795,6 +795,30 @@
     return filterDescriptionText(allLines.slice(0, 180).join("\n"));
   }
 
+  function getOpenJobTitleAndCompany() {
+    const container = findDetailContainer();
+    const title = detailField(container, [
+      ".job-details-jobs-unified-top-card__job-title",
+      ".jobs-unified-top-card__job-title",
+      "[data-testid*='job-title']",
+      "h1"
+    ]);
+    const company = detailField(container, [
+      ".job-details-jobs-unified-top-card__company-name",
+      ".jobs-unified-top-card__company-name",
+      "[data-testid*='company']",
+      "a[href*='/company/']"
+    ]);
+    return { title: clean(title), company: clean(company) };
+  }
+
+  function getOpenJobSafeName() {
+    const { title, company } = getOpenJobTitleAndCompany();
+    if (!title && !company) return "";
+    const combined = [company, title].filter(Boolean).join(" - ");
+    return sanitizeDirectoryName(combined);
+  }
+
   async function getOpenJobDetails() {
     const exactSelection = selectedText();
     if (exactSelection) {
@@ -854,8 +878,8 @@
   }
 
   async function handleRuntimeAction(type) {
-    if (type === "PING" || type === "PING_V130") {
-      return { ok: true, version: "1.3.0" };
+    if (type === "PING" || type === "PING_V131") {
+      return { ok: true, version: "1.3.1" };
     }
 
     if (type === "COPY_JOB_LIST") {
@@ -869,16 +893,15 @@
       return { ok: true, count: jobs.length, text: formatJobList(jobs) };
     }
 
-    if (type === "COPY_SAFE_JOB_NAMES") {
-      const jobs = extractJobCards();
-      if (!jobs.length) {
+    if (type === "COPY_OPEN_SAFE_JOB_NAME") {
+      const name = getOpenJobSafeName();
+      if (!name) {
         return {
           ok: false,
-          error: "No visible LinkedIn job cards were found. Scroll the left results pane slightly, then try again."
+          error: "Could not find the open job company and title. Click a job first, then try again."
         };
       }
-      const text = formatSafeJobNames(jobs);
-      return { ok: true, count: text.split("\n").filter(Boolean).length, text };
+      return { ok: true, count: 1, text: name };
     }
 
     if (type === "REMOVE_LISTED_JOBS") {
@@ -909,8 +932,8 @@
     return { ok: false, error: "Unknown action." };
   }
 
-  window.__linkedinJobCopierV130Api = {
-    version: "1.3.0",
+  window.__linkedinJobCopierV131Api = {
+    version: "1.3.1",
     handle: handleRuntimeAction
   };
 

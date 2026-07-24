@@ -7,7 +7,7 @@ A small Chrome Manifest V3 extension for copying LinkedIn Jobs data into GPT.
 - **Copy positions list**: copies the visible job cards from the LinkedIn Jobs results pane.
 - **Copy open position info**: copies the currently open job details from the right pane and expands only the job-description `… more` button when LinkedIn renders one.
 - **Remove listed positions**: clicks the visible X/dismiss button on each visible job card in the current left results pane.
-- **Copy company + title names**: copies one directory-safe `Company - Title` line per visible job, removing `/`, newlines, and other symbols that can cause folder-name problems.
+- **Copy open company + title**: copies only the currently open job as one directory-safe `Company - Title` line, removing `/`, newlines, and other symbols that can cause folder-name problems.
 - If you manually highlight text on the page first, **Copy open position info** copies that selected text exactly.
 - **Add GPT analysis prompt** is unchecked by default.
 - **Edit prompt** lets you customize and save the list-analysis and open-position prompts.
@@ -28,10 +28,15 @@ A small Chrome Manifest V3 extension for copying LinkedIn Jobs data into GPT.
 2. In `chrome://extensions`, either remove the old LinkedIn Job Copier and load this folder again, or click **Reload** on the existing unpacked extension after replacing the files.
 3. Reload the LinkedIn Jobs tab.
 
+## Version 1.3.1 change
+
+- Changed **Copy open company + title** so it copies only the currently open job, not every visible listed job.
+- The output is still cleaned for Ubuntu folder names, for example: `Company - Job Title`.
+
 ## Version 1.3.0 changes
 
 - Added **Remove listed positions** to dismiss visible jobs from the current LinkedIn results page.
-- Added **Copy company + title names** to create Ubuntu-friendly folder names from visible job cards.
+- Added the company/title copy feature.
 - Updated the popup and content script version to 1.3.0.
 
 ## Version 1.2.0 fixes
