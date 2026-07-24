@@ -1,6 +1,6 @@
 (() => {
-  if (window.__linkedinJobCopierInstalledV131) return;
-  window.__linkedinJobCopierInstalledV131 = true;
+  if (window.__linkedinJobCopierInstalledV132) return;
+  window.__linkedinJobCopierInstalledV132 = true;
 
   const JOB_CARD_SELECTORS = [
     "li[data-occludable-job-id]",
@@ -795,20 +795,139 @@
     return filterDescriptionText(allLines.slice(0, 180).join("\n"));
   }
 
+  function textWithAttributes(el) {
+    if (!el) return "";
+    return clean([
+      textOf(el),
+      el.getAttribute?.("aria-label"),
+      el.getAttribute?.("title")
+    ].filter(Boolean).join("\n"));
+  }
+
+  function isInRightDetailArea(el) {
+    if (!isVisible(el)) return false;
+    const rect = rectOf(el);
+    if (rect.width < 25 || rect.height < 8) return false;
+    return rect.left > window.innerWidth * 0.28 && rect.right > window.innerWidth * 0.46;
+  }
+
+  function isLikelyOpenJobTitleLine(line, company = "") {
+    const value = clean(line);
+    if (!value || value.length < 4 || value.length > 180) return false;
+    if (company && value.toLowerCase() === clean(company).toLowerCase()) return false;
+    if (isNoiseLine(value) || META_LINE_RE.test(value) || LOCATION_LINE_RE.test(value)) return false;
+    if (/^(full[- ]time|part[- ]time|contract|internship|temporary|volunteer|on-site|remote|hybrid)$/i.test(value)) return false;
+    if (/^(take the next step|practice an interview|application status|your profile|see how you compare|job search faster)/i.test(value)) return false;
+    return true;
+  }
+
+  function firstBestVisibleText(root, selectors, options = {}) {
+    const roots = [root, document].filter(Boolean);
+    const seen = new Set();
+    const candidates = [];
+
+    for (const base of roots) {
+      for (const selector of selectors) {
+        for (const el of safeQueryAll(base, selector)) {
+          if (seen.has(el) || !isInRightDetailArea(el)) continue;
+          seen.add(el);
+          const rect = rectOf(el);
+          const selectorScore = /h1|job-title|top-card__job-title|title/.test(selector) ? 120 : 30;
+          for (const line of lines(textWithAttributes(el))) {
+            if (options.predicate && !options.predicate(line)) continue;
+            const roleBonus = ROLE_WORDS.test(line) ? 80 : 0;
+            const topBonus = Math.max(0, 80 - Math.max(rect.top, 0) / 8);
+            const sizeBonus = Math.min(rect.height, 80);
+            candidates.push({ text: line, score: selectorScore + roleBonus + topBonus + sizeBonus });
+          }
+        }
+      }
+    }
+
+    candidates.sort((a, b) => b.score - a.score);
+    return clean(candidates[0]?.text || "");
+  }
+
+  function topDetailLines(container) {
+    const rect = rectOf(container);
+    const cutoffY = Math.min(rect.top + 320, window.innerHeight * 0.72);
+    const visibleTopNodes = safeQueryAll(container, "h1, h2, h3, a[href*='/company/'], span, div")
+      .filter((el) => isInRightDetailArea(el))
+      .filter((el) => {
+        const r = rectOf(el);
+        return r.top >= rect.top - 10 && r.top <= cutoffY;
+      })
+      .sort((a, b) => rectOf(a).top - rectOf(b).top || rectOf(a).left - rectOf(b).left);
+
+    const out = [];
+    for (const node of visibleTopNodes) {
+      for (const line of lines(textWithAttributes(node))) {
+        if (isNoiseLine(line)) continue;
+        if (!out.includes(line)) out.push(line);
+      }
+      if (out.length >= 35) break;
+    }
+
+    if (out.length) return out;
+
+    const all = lines(textOf(container));
+    const stop = all.findIndex((line) => /^About the job$/i.test(line) || /^About this job$/i.test(line) || /^Job description$/i.test(line));
+    return (stop >= 0 ? all.slice(0, stop) : all.slice(0, 35)).filter((line) => !isNoiseLine(line));
+  }
+
   function getOpenJobTitleAndCompany() {
     const container = findDetailContainer();
-    const title = detailField(container, [
-      ".job-details-jobs-unified-top-card__job-title",
-      ".jobs-unified-top-card__job-title",
-      "[data-testid*='job-title']",
-      "h1"
-    ]);
-    const company = detailField(container, [
+
+    const companySelectors = [
+      ".job-details-jobs-unified-top-card__company-name a",
       ".job-details-jobs-unified-top-card__company-name",
+      ".jobs-unified-top-card__company-name a",
       ".jobs-unified-top-card__company-name",
+      ".topcard__org-name-link",
       "[data-testid*='company']",
       "a[href*='/company/']"
-    ]);
+    ];
+
+    const titleSelectors = [
+      ".job-details-jobs-unified-top-card__job-title h1",
+      ".job-details-jobs-unified-top-card__job-title a",
+      ".job-details-jobs-unified-top-card__job-title",
+      ".jobs-unified-top-card__job-title h1",
+      ".jobs-unified-top-card__job-title a",
+      ".jobs-unified-top-card__job-title",
+      ".top-card-layout__title",
+      "[data-testid*='job-title']",
+      "h1"
+    ];
+
+    const company = firstBestVisibleText(container, companySelectors, {
+      predicate: (line) => !isNoiseLine(line) && !META_LINE_RE.test(line) && !LOCATION_LINE_RE.test(line)
+    });
+
+    let title = firstBestVisibleText(container, titleSelectors, {
+      predicate: (line) => isLikelyOpenJobTitleLine(line, company)
+    });
+
+    // LinkedIn sometimes renders the title without the older job-title classes. In that case,
+    // the top card usually appears as: company, then title, then location/meta. Use those visible
+    // top-card lines as a fallback so the safe folder name does not become company-only.
+    if (!title) {
+      const visibleLines = topDetailLines(container);
+      const companyIndex = company ? visibleLines.findIndex((line) => clean(line).toLowerCase() === company.toLowerCase()) : -1;
+      const orderedPool = companyIndex >= 0 ? visibleLines.slice(companyIndex + 1).concat(visibleLines.slice(0, companyIndex)) : visibleLines;
+      title = orderedPool.find((line) => isLikelyOpenJobTitleLine(line, company) && ROLE_WORDS.test(line)) ||
+        orderedPool.find((line) => isLikelyOpenJobTitleLine(line, company)) || "";
+    }
+
+    // Last fallback: use the title from the selected job card on the left only when it matches the
+    // currently opened job URL/id context well enough to be useful.
+    if (!title) {
+      const jobs = extractJobCards();
+      const currentId = new URL(location.href).searchParams.get("currentJobId") || "";
+      const selected = jobs.find((job) => currentId && job.link.includes(currentId)) || jobs[0];
+      if (selected?.title && isLikelyOpenJobTitleLine(selected.title, company)) title = selected.title;
+    }
+
     return { title: clean(title), company: clean(company) };
   }
 
@@ -878,8 +997,8 @@
   }
 
   async function handleRuntimeAction(type) {
-    if (type === "PING" || type === "PING_V131") {
-      return { ok: true, version: "1.3.1" };
+    if (type === "PING" || type === "PING_V132") {
+      return { ok: true, version: "1.3.2" };
     }
 
     if (type === "COPY_JOB_LIST") {
@@ -932,8 +1051,8 @@
     return { ok: false, error: "Unknown action." };
   }
 
-  window.__linkedinJobCopierV131Api = {
-    version: "1.3.1",
+  window.__linkedinJobCopierV132Api = {
+    version: "1.3.2",
     handle: handleRuntimeAction
   };
 

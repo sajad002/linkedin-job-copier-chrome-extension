@@ -28,6 +28,11 @@ A small Chrome Manifest V3 extension for copying LinkedIn Jobs data into GPT.
 2. In `chrome://extensions`, either remove the old LinkedIn Job Copier and load this folder again, or click **Reload** on the existing unpacked extension after replacing the files.
 3. Reload the LinkedIn Jobs tab.
 
+
+## Version 1.3.2 fix
+
+- Fixed **Copy open company + title** so it uses stronger title selectors and a top-card fallback when LinkedIn does not expose the job title through the older classes.
+
 ## Version 1.3.1 change
 
 - Changed **Copy open company + title** so it copies only the currently open job, not every visible listed job.
